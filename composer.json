@@ -1,0 +1,7 @@
+{
+    "name": "mh/spring_shipment",
+    "type": "project",
+    "require": {
+        "php": ">=8.4.3"
+    }
+}
