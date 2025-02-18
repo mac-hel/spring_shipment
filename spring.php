@@ -4,54 +4,61 @@ declare(strict_types=1);
 
 namespace Spring;
 
+// TODO: validation, errors, tests, ui
+
 class Shipment
 {
-    // TODO - create it somehow?
-    private const string SHIPPER_REFERENCE = "BL_JanKowalski_002";
-
     /**
+     * @return string tracking number
      * @throws Error
      */
-    public function newPackage(array $order, array $params): Package
+    public function newPackage(array $order, array $params): string
     {
-        $error = $this->validateShipmentInput($order, $params);
+        $error = $this->validateOrderShipmentInput($order, $params);
         if ($error) {
             throw $error;
         }
 
-        $data = $this->createShipmentData($order, $params);
+        $data = $this->createOrderShipmentData($order, $params['label_format'], $params['service']);
 
-        $result = $this->postRequest($params['url'], $data);
-
-        if (!isset($result['Shipment']['TrackingNumber'])) {
-            throw new Error('network connection error');
+        $response = new Request($params['url'], $params['api_key'])->fire('OrderShipment', $data);
+        if ($response->error) {
+            throw $response->error;
         }
 
-        return new Package($result['Shipment']['TrackingNumber']);
+        if (!isset($response->result['Shipment']['TrackingNumber'])) {
+            throw new Error('tracking number missing in response', Error::INVALID_RESPONSE);
+        }
+
+        return $response->result['Shipment']['TrackingNumber'];
     }
 
     /**
+     * @return string label image
      * @throws Error
      */
-    public function getLabel(string $trackingNumber, array $params): Label
+    public function getLabelImage(string $trackingNumber, array $params): string
     {
         $error = $this->validateLabelInput($trackingNumber, $params);
         if ($error) {
             throw $error;
         }
 
-        $data = $this->createLabelData($trackingNumber, $params);
+        $data = $this->createLabelData($trackingNumber, $params['label_format']);
 
-        $result = $this->postRequest($params['url'], $data);
-
-        if (!isset($result['Shipment']['TrackingNumber'])) {
-            throw new Error('network connection error');
+        $response = new Request($params['url'], $params['api_key'])->fire('GetShipmentLabel', $data);
+        if ($response->error) {
+            throw $response->error;
         }
 
-        return new Label($result['Shipment']['LabelImage']);
+        if (!isset($response->result['Shipment']['LabelImage'])) {
+            throw new Error('label image missing in response', Error::INVALID_RESPONSE);
+        }
+
+        return $response->result['Shipment']['LabelImage'];
     }
 
-    private function validateShipmentInput(array $order, array $params): ?Error
+    private function validateOrderShipmentInput(array $order, array $params): ?Error
     {
         // TODO
         return null;
@@ -63,16 +70,16 @@ class Shipment
         return null;
     }
 
-    private function createShipmentData(array $order, array $params): array
+    private function createOrderShipmentData(array $order, string $labelFormat, string $springService): array
     {
+        $shipperReference = $this->generateShipperReference($order['sender_fullname']);
+
         return [
-            "Apikey" => $params['api_key'],
-            "Command" => 'OrderShipment',
             "Shipment" => [
-                "LabelFormat" => $params['label_format'],
-                "ShipperReference" => self::SHIPPER_REFERENCE,
+                "LabelFormat" => $labelFormat,
+                "ShipperReference" => $shipperReference,
                 "OrderDate" => new \DateTimeImmutable()->format("Y-m-d"),
-                "Service" => $params['service'],
+                "Service" => $springService,
 
                 "Weight" => $order['weight'],
                 "Value" => $order['value'],
@@ -103,26 +110,39 @@ class Shipment
         ];
     }
 
-    private function createLabelData(string $trackingNumber, array $params): array
+    private function generateShipperReference(string $name): string
+    {
+        $salt = "BaseLinker";
+        $timestamp = time();
+        $hash = hash('sha256', $name . $salt . $timestamp);
+        return substr($hash, 0, 16);
+    }
+
+    private function createLabelData(string $trackingNumber, string $labelFormat): array
     {
         return [
-            "Apikey" => $params['api_key'],
-            "Command" => 'GetShipmentLabel',
             "Shipment" => [
-                "LabelFormat" => $params['label_format'],
+                "LabelFormat" => $labelFormat,
                 "TrackingNumber" => $trackingNumber,
             ],
         ];
     }
+}
 
-    /**
-     * @throws Error
-     */
-    private function postRequest(string $url, array $postData): array
+readonly class Request {
+    public function __construct(
+        private string $url,
+        private string $apiKey,
+    ) {
+    }
+
+    public function fire(string $command, array $postData): Response
     {
+        $postData["Apikey"] = $this->apiKey;
+        $postData["Command"] = $command;
         $body = json_encode($postData);
         if ($body === false) {
-            throw new Error('invalid input');
+            return new Response(new Error('json_encode body: ' . json_last_error_msg(), Error::INTERNAL));
         }
 
         $options = [
@@ -133,59 +153,43 @@ class Shipment
             ],
         ];
 
+        // TODO - switch to curl/other?
         $context = stream_context_create($options);
-        // TODO - check if error can be checked
-        $response = file_get_contents($url, false, $context);
+        $response = @file_get_contents($this->url, false, $context);
         if ($response === false) {
-            throw new Error('network connection error');
+            return new Response(new Error('request failed', Error::REQUEST_FAILED));
         }
-        // TODO - check if error can be checked
 
         /** @var array|null $result */
         $result = json_decode($response, true);
         if ($result === null) {
-            throw new Error('network connection error');
+            return new Response(new Error('json_decode response: ' . json_last_error_msg(), Error::INVALID_RESPONSE));
         }
 
         if (isset($result['ErrorLevel']) && $result['ErrorLevel'] !== 0) {
-            // TODO - check levels
             $msg = $result['Error'] ?? 'network connection error';
-            throw new Error($msg);
+            $code = $result['ErrorLevel'] === 1 ? Error::API_ERROR : Error::API_FATAL_ERROR;
+            return new Response(new Error($msg, $code));
         }
 
-        return $result;
+        return new Response(null, $result);
     }
 }
 
-//readonly class Request
-//{
-//    public function __construct(
-//        private string $url,
-//        private string $api_key,
-//        private string $command,
-//        private array $data,
-//    ) {
-//    }
-//}
-
-readonly class Package
+readonly class Response
 {
     public function __construct(
-        public string $trackingNumber,
-        public ?Error $error = null,
-    ) {
-    }
-}
-
-readonly class Label
-{
-    public function __construct(
-        public string $label,
-        public ?Error $error = null,
+        public ?Error $error,
+        public array $result = [],
     ) {
     }
 }
 
 class Error extends \Exception
 {
+    public const int INTERNAL = 1;
+    public const int REQUEST_FAILED = 2;
+    public const int INVALID_RESPONSE = 3;
+    public const int API_FATAL_ERROR = 4;
+    public const int API_ERROR = 5;
 }
