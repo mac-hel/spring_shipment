@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace Spring;
 
-// TODO: *validation, *errors, tests, ui, *scripts to composer.json, *README?, phpdoc types, switch to curl?
+// TODO: *validation, *errors, tests, ui, *scripts to composer.json, *README?, phpdoc types and comments, switch to curl?
+// TODO: input sanitization
 
 /**
  * Create shipment package in Spring system
@@ -25,6 +26,10 @@ readonly class NewPackage
      */
     public function __invoke(array $order, array $params): string
     {
+        foreach ($order as $key => $value) {
+            $order[$key] = trim($value);
+        }
+
         $error = $this->validate($order, $params['service']);
         if ($error) {
             throw $error;
@@ -91,6 +96,10 @@ readonly class NewPackage
         if (!isset($order['value']) || !filter_var($order['value'], FILTER_VALIDATE_FLOAT)) {
             return new Error('please provide package value', Error::INVALID_INPUT);
         }
+        if (!isset($order['delivery_email']) || !filter_var($order['delivery_email'], FILTER_VALIDATE_EMAIL)) {
+            return new Error('please provide delivery email', Error::INVALID_INPUT);
+        }
+
 
         // simple validation of maximum length allowed by the API
         $serviceRequirements = $this->servicesRequirements($springService);
@@ -98,14 +107,22 @@ readonly class NewPackage
             return new Error("Unsupported service", Error::INTERNAL);
         }
         foreach ($serviceRequirements['input'] as $key => $valid) {
-            if (!isset($order[$key]) || mb_strlen($order[$key]) > $valid[0]) {
+            if (
+                !isset($order[$key])
+                || $order[$key] === ''
+                || mb_strlen($order[$key]) > $valid[0]
+                || '' === htmlspecialchars($order[$key], ENT_QUOTES | ENT_HTML401, 'UTF-8')
+            ) {
                 return new Error("please provide {$valid[1]} with maximum of {$valid[0]} characters", Error::INVALID_INPUT);
             }
         }
 
         // need to check country because API does not validate it
+        if (!isset($order['sender_country']) || !in_array($order['sender_country'], $serviceRequirements['country_codes'], true)) {
+            return new Error('please provide valid ISO 4217 sender country code', Error::INVALID_INPUT);
+        }
         if (!isset($order['delivery_country']) || !in_array($order['delivery_country'], $serviceRequirements['country_codes'], true)) {
-            return new Error('please provide valid ISO 4217 country code', Error::INVALID_INPUT);
+            return new Error('please provide valid ISO 4217 delivery country code', Error::INVALID_INPUT);
         }
 
         return null;
@@ -229,7 +246,7 @@ readonly class Request {
     {
         $postData["Apikey"] = $this->apiKey;
         $postData["Command"] = $command;
-        $body = json_encode($postData);
+        $body = json_encode($postData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         if ($body === false) {
             return new Response(new Error('json_encode body: ' . json_last_error_msg(), Error::INTERNAL));
         }
@@ -243,7 +260,7 @@ readonly class Request {
         ];
 
         // TODO - switch to curl/other?
-        // 'curl' may be used here instead (ex. when more control is needed) - if 'curl' lib is installed as php extension
+        // 'curl' may be used here instead (if more control is needed) - 'curl' lib needs to be installed as php extension
         $context = stream_context_create($options);
         $response = @file_get_contents($this->url, false, $context);
         if ($response === false) {
@@ -278,7 +295,7 @@ readonly class Response
 class Error extends \Exception
 {
     public const int INTERNAL = 1;          // message not for end user - only for logging purposes
-    public const int API_FATAL_ERROR = 2;   // message suitable for end user (but comes from Spring API)
-    public const int API_ERROR = 3;         // message suitable for end user (but comes from Spring API)
+    public const int API_FATAL_ERROR = 2;   // message suitable for end user (note it comes from Spring API)
+    public const int API_ERROR = 3;         // message suitable for end user (note it comes from Spring API)
     public const int INVALID_INPUT = 4;     // message suitable for end user
 }

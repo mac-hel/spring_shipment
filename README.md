@@ -4,7 +4,7 @@
 użyj skryptów w `composer.json`, ex:
 ```
 composer test
-composer run
+composer start
 ```
 
 ## Dodatkowe info

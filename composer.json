@@ -2,7 +2,8 @@
     "name": "mh/spring_shipment",
     "type": "project",
     "scripts": {
-        "test": "php test.php"
+        "test": "php test.php",
+        "start": "php -S localhost:8000 ui.php"
     },
     "require": {
         "php": ">=8.4.3",
