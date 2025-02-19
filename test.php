@@ -4,9 +4,8 @@ declare(strict_types=1);
 
 require __DIR__ . DIRECTORY_SEPARATOR . 'spring.php';
 
-// test it runs
+// test it runs - happy path
 (static function() {
-    $shipment = new Spring\Shipment();
 
     $params = [
         'url' => 'https://mtapi.net/?testMode=1',
@@ -16,18 +15,15 @@ require __DIR__ . DIRECTORY_SEPARATOR . 'spring.php';
     ];
 
     $order = [
-        'weight' => '0.7',
-        'value' => '120',
-        'currency' => 'PLN',
-        'description' => 'Technical documentation of the project',
-        'declaration_type' => 'Documents',
-        'sender_fullname' => 'Lopez the Quick',
-        'sender_company' => 'BaseLinker',
-        'sender_address' => 'Kiszczaka 12A',
-        'sender_city' => 'Abramów',
-        'sender_postalcode' => '67890',
-        'sender_country' => 'PL',
-        'sender_phone' => '555555555',
+        'weight' => '0.7',      // optional, API Validates it: Maximum weight exceeded
+        'value' => '120',       // optional, API Validates it: Invalid Value
+        'sender_fullname' => 'Lopez the Quick',     // optional; 30
+        'sender_company' => 'BaseLinker',           // 30
+        'sender_address' => 'Kiszczaka 12A',           // 30
+        'sender_city' => 'Abramów',           // 30
+        'sender_postalcode' => '67890',         // 20
+        'sender_country' => 'PL',               // supported list
+        'sender_phone' => '555555555',          // 15
         'delivery_fullname' => 'Maud Driant',
         'delivery_company' => 'Spring GDS',
         'delivery_address' => 'Strada Foisorului, Nr. 16, Bl. F11C, Sc. 1, Ap. 10',
@@ -39,29 +35,46 @@ require __DIR__ . DIRECTORY_SEPARATOR . 'spring.php';
     ];
 
     try {
-        $trackingNumber = $shipment->newPackage($order, $params);
+        $trackingNumber = new \Spring\NewPackage()($order, $params);
     } catch (Spring\Error $error) {
-        echo 'newPackage error: ', $error->getMessage() . PHP_EOL;
-        exit(1);
+        fatalError('NewPackage error', $error);
     } catch (\Throwable $e) {
-        echo 'newPackage unknown error: ', $e->getMessage() . PHP_EOL;
-        exit(1);
+        fatalError('NewPackage unexpected error: ' . $e->getMessage());
     }
 
-    var_Dump($trackingNumber);
+    var_dump($trackingNumber);
 
     try {
-        $labelImage = $shipment->getLabelImage($trackingNumber, $params);
+        $labelImage = new \Spring\GetLabelImage()($trackingNumber, $params);
     } catch (Spring\Error $error) {
-        echo 'getLabel error: ', $error->getMessage() . PHP_EOL;
-        exit(1);
+        fatalError('GetLabelImage error', $error);
     } catch (\Throwable $e) {
-        echo 'getLabel unknown error: ', $e->getMessage() . PHP_EOL;
-        exit(1);
+        fatalError('GetLabelImage unexpected error: ' . $e->getMessage());
     }
 
-    // TODO:
-    //  - decode label + display
-
-    var_Dump(strlen($labelImage));
+    var_dump(strlen($labelImage));
+    echo labelImageToText($labelImage) . PHP_EOL;
 })();
+
+function fatalError(string $header, ?Spring\Error $error = null): void
+{
+    echo $header . PHP_EOL;
+    if ($error) {
+        $msg = match ($error->getCode()) {
+            Spring\Error::INTERNAL => "Error occurred, try again later.",
+            Spring\Error::API_FATAL_ERROR,
+            Spring\Error::API_ERROR,
+            Spring\Error::INVALID_INPUT => $error->getMessage(),
+        };
+        echo $msg . PHP_EOL;
+    }
+    exit(1);
+}
+
+function labelImageToText(string $label): string {
+    $tempPdf = tempnam(sys_get_temp_dir(), 'pdf_') . '.pdf';
+    file_put_contents($tempPdf, $label);
+    $output = shell_exec("pdftotext $tempPdf -"); // - outputs to stdout
+    unlink($tempPdf);
+    return $output ?? '';
+}

@@ -1,7 +1,11 @@
 {
     "name": "mh/spring_shipment",
     "type": "project",
+    "scripts": {
+        "test": "php test.php"
+    },
     "require": {
-        "php": ">=8.4.3"
+        "php": ">=8.4.3",
+        "ext-mbstring": "*"
     }
 }
