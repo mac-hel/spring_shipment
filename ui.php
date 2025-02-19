@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 require __DIR__ . DIRECTORY_SEPARATOR . 'spring.php';
 
-$errors = [];
+$error = '';
 $success = false;
 $trackingNumber = '';
 $order = [
@@ -40,21 +40,44 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
     try {
         $trackingNumber = new \Spring\NewPackage()($order, $envs);
-        $labelImage = new \Spring\GetLabelImage()($trackingNumber, $envs);
-    } catch (Spring\Error $error) {
-        $errors[] = errorMessage('', $error);
+    } catch (Spring\Error $e) {
+        $error = errorMessage($e);
     } catch (\Throwable $e) {
-        $errors[] = errorMessage('We are temporarily unable to process your request, please try again later');
+        $error = errorMessage();
     }
 
-    if (empty($errors)) {
+    if (empty($error)) {
         $success = true;
     }
+
+} elseif (isset($_GET['download_label'])) {
+
+    $labelImage = '';
+    try {
+        // in real scenario tracking number is checked (or comes from) DB/Session
+        $labelImage = new \Spring\GetLabelImage()($_GET['download_label'], $envs);
+    } catch (Spring\Error $error) {
+        $error = errorMessage($error);
+    } catch (\Throwable $e) {
+        $error = errorMessage();
+    }
+
+    if (!empty($error)) {
+        http_response_code(500);
+        echo $error;
+        exit;
+    }
+
+    header('Content-Type: application/pdf');
+    header('Content-Disposition: attachment; filename="label.pdf"');
+    header('Content-Length: ' . strlen($labelImage));
+
+    echo $labelImage;
+    exit;
 }
 
-function errorMessage(string $prefix, ?Spring\Error $error = null): string
+function errorMessage(?Spring\Error $error = null): string
 {
-    $msg = '';
     if ($error) {
         $msg = match ($error->getCode()) {
             Spring\Error::INTERNAL => 'Error occurred, try again later',
@@ -62,10 +85,12 @@ function errorMessage(string $prefix, ?Spring\Error $error = null): string
             Spring\Error::API_ERROR,
             Spring\Error::INVALID_INPUT => $error->getMessage(),
         };
+    } else {
+        $msg = 'We are temporarily unable to process your request, please try again later';
     }
-    return "{$prefix} {$msg}";
-}
 
+    return $msg;
+}
 ?>
 
 <!DOCTYPE html>
@@ -83,21 +108,21 @@ function errorMessage(string $prefix, ?Spring\Error $error = null): string
     <?php if ($success): ?>
         <div class="bg-green-100 text-green-700 p-3 rounded mb-4">
             ✅ Form submitted successfully!
-            Your tracking number: <b><?= $trackingNumber ?></b>
+            Your tracking number: <b><?= htmlspecialchars($trackingNumber) ?></b>
             Package label download will start shortly.
         </div>
     <?php endif ?>
 
     <form method="POST" class="space-y-4">
 
-        <?php foreach ($errors as $msg): ?>
-            <p class="text-red-500 text-sm"><?= $msg; ?></p>
-        <?php endforeach ?>
+        <?php if (!empty($error)): ?>
+            <p class="text-red-500 text-sm"><?= $error ?></p>
+        <?php endif ?>
 
         <?php foreach ($order as $field => $value): ?>
             <div>
                 <label class="block font-medium capitalize" for="<?= $field ?>">
-                    <?= ucfirst($field) ?>
+                    <?= ucfirst(str_replace('_', ' ', $field)) ?>
                 </label>
                 <input type="text" id="<?= $field ?>" name="<?= $field ?>"
                        value="<?= htmlspecialchars($value) ?>"
@@ -107,9 +132,19 @@ function errorMessage(string $prefix, ?Spring\Error $error = null): string
         <?php endforeach ?>
 
         <button type="submit" class="w-full bg-blue-500 text-white py-2 rounded hover:bg-blue-600">
-            Submit
+            Create Package
         </button>
     </form>
 </div>
+
+<?php if ($success): ?>
+    <script>
+        // redirect to download page
+        const url = new URL(window.location.href);
+        url.searchParams.set("download_label", "<?= $trackingNumber ?>");
+        window.location.href = url.toString();
+    </script>
+<?php endif ?>
+
 </body>
 </html>

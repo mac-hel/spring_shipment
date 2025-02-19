@@ -17,7 +17,8 @@ require __DIR__ . DIRECTORY_SEPARATOR . 'spring.php';
     $order = [
         'weight' => '0.7',      // optional, API Validates it: Maximum weight exceeded
         'value' => '120',       // optional, API Validates it: Invalid Value
-        'sender_fullname' => 'Lopez the Quick',     // optional; 30
+        //'sender_fullname' => 'Lopez the Quick',     // optional; 30
+        'sender_fullname' => '<script>alert("ole");</script>',
         'sender_company' => 'BaseLinker',           // 30
         'sender_address' => 'Kiszczaka 12A',           // 30
         'sender_city' => 'Abramów',           // 30

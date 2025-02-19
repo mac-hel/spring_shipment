@@ -4,9 +4,6 @@ declare(strict_types=1);
 
 namespace Spring;
 
-// TODO: *validation, *errors, tests, ui, *scripts to composer.json, *README?, phpdoc types and comments, switch to curl?
-// TODO: input sanitization
-
 /**
  * Create shipment package in Spring system
  */
@@ -27,10 +24,10 @@ readonly class NewPackage
     public function __invoke(array $order, array $params): string
     {
         foreach ($order as $key => $value) {
-            $order[$key] = trim($value);
+            $order[$key] = htmlspecialchars(trim($value), ENT_QUOTES | ENT_HTML401, 'UTF-8');
         }
 
-        $error = $this->validate($order, $params['service']);
+        $error = $this->validateInput($order, $params['service']);
         if ($error) {
             throw $error;
         }
@@ -87,7 +84,7 @@ readonly class NewPackage
         return $services[$springService];
     }
 
-    private function validate(array $order, string $springService): ?Error
+    private function validateInput(array $order, string $springService): ?Error
     {
         if (!isset($order['weight']) || !filter_var($order['weight'], FILTER_VALIDATE_FLOAT)) {
             return new Error('please provide weight in kg', Error::INVALID_INPUT);
@@ -100,18 +97,17 @@ readonly class NewPackage
             return new Error('please provide delivery email', Error::INVALID_INPUT);
         }
 
-
         // simple validation of maximum length allowed by the API
         $serviceRequirements = $this->servicesRequirements($springService);
         if (!isset($serviceRequirements['input'])) {
             return new Error("Unsupported service", Error::INTERNAL);
         }
+
         foreach ($serviceRequirements['input'] as $key => $valid) {
             if (
                 !isset($order[$key])
                 || $order[$key] === ''
                 || mb_strlen($order[$key]) > $valid[0]
-                || '' === htmlspecialchars($order[$key], ENT_QUOTES | ENT_HTML401, 'UTF-8')
             ) {
                 return new Error("please provide {$valid[1]} with maximum of {$valid[0]} characters", Error::INVALID_INPUT);
             }
@@ -132,8 +128,8 @@ readonly class NewPackage
     {
         $shipperReference = $this->generateShipperReference($order['sender_fullname']);
 
-        $consignorAddressLines = $this->splitAddress($order['sender_address'], $springService);
-        $consigneeAddressLines = $this->splitAddress($order['delivery_address'], $springService);
+        $consignorAddressLines = $this->splitAddressIntoLines($order['sender_address'], $springService);
+        $consigneeAddressLines = $this->splitAddressIntoLines($order['delivery_address'], $springService);
 
         return [
             "Shipment" => [
@@ -165,7 +161,15 @@ readonly class NewPackage
         ];
     }
 
-    private function splitAddress(string $address, string $springService): array
+    private function generateShipperReference(string $name): string
+    {
+        $salt = "BaseLinker";
+        $timestamp = time();
+        $hash = hash('sha256', $name . $salt . $timestamp);
+        return substr($hash, 0, 16);
+    }
+
+    private function splitAddressIntoLines(string $address, string $springService): array
     {
         $serviceRequirements = $this->servicesRequirements($springService);
         $maxLength = $serviceRequirements['max_address_line_length'];
@@ -182,14 +186,6 @@ readonly class NewPackage
         }
 
         return $lines;
-    }
-
-    private function generateShipperReference(string $name): string
-    {
-        $salt = "BaseLinker";
-        $timestamp = time();
-        $hash = hash('sha256', $name . $salt . $timestamp);
-        return substr($hash, 0, 16);
     }
 }
 
@@ -235,6 +231,9 @@ readonly class GetLabelImage
     }
 }
 
+/**
+ * General request to Spring API
+ */
 readonly class Request {
     public function __construct(
         private string $url,
@@ -242,6 +241,11 @@ readonly class Request {
     ) {
     }
 
+    /**
+     * @param string $command see Spring API for available commands
+     * @param array $postData data to send as POST payload
+     * @return Response
+     */
     public function fire(string $command, array $postData): Response
     {
         $postData["Apikey"] = $this->apiKey;
@@ -259,7 +263,6 @@ readonly class Request {
             ],
         ];
 
-        // TODO - switch to curl/other?
         // 'curl' may be used here instead (if more control is needed) - 'curl' lib needs to be installed as php extension
         $context = stream_context_create($options);
         $response = @file_get_contents($this->url, false, $context);
@@ -283,6 +286,9 @@ readonly class Request {
     }
 }
 
+/**
+ * Response from Spring API
+ */
 readonly class Response
 {
     public function __construct(
@@ -292,6 +298,9 @@ readonly class Response
     }
 }
 
+/**
+ * Module errors
+ */
 class Error extends \Exception
 {
     public const int INTERNAL = 1;          // message not for end user - only for logging purposes
